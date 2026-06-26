@@ -21,6 +21,10 @@ interface EnvVars {
   OPEN_EXCHANGE_RATES_APP_ID: string;
   OPEN_EXCHANGE_RATES_BASE_URL: string;
   RATES_CACHE_TTL_MS: number;
+
+  // Rate limiting
+  THROTTLE_TTL_MS: number;
+  THROTTLE_LIMIT: number;
 }
 
 const envSchema = joi
@@ -38,6 +42,8 @@ const envSchema = joi
     OPEN_EXCHANGE_RATES_APP_ID: joi.string().required(),
     OPEN_EXCHANGE_RATES_BASE_URL: joi.string().optional(),
     RATES_CACHE_TTL_MS: joi.number().optional(),
+    THROTTLE_TTL_MS: joi.number().optional(),
+    THROTTLE_LIMIT: joi.number().optional(),
   })
   .unknown(true);
 
@@ -67,4 +73,6 @@ export const envs = {
   openExchangeRatesAppId: envVars.OPEN_EXCHANGE_RATES_APP_ID,
   openExchangeRatesBaseUrl: envVars.OPEN_EXCHANGE_RATES_BASE_URL,
   ratesCacheTtlMs: envVars.RATES_CACHE_TTL_MS,
+  throttleTtlMs: envVars.THROTTLE_TTL_MS,
+  throttleLimit: envVars.THROTTLE_LIMIT,
 };

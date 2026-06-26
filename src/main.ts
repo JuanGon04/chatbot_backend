@@ -5,9 +5,14 @@ import { BadRequestException, ValidationPipe } from "@nestjs/common";
 import helmet from "helmet";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { HttpExceptionFilter } from "./common/filters";
+import { NestExpressApplication } from "@nestjs/platform-express";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  //Trust proxy — hable the app to work behind a reverse proxy (like Nginx) and correctly identify the client's IP address
+
+  app.set("trust proxy", 1);
 
   // Helmet — Security headers
   app.use(
@@ -34,6 +39,11 @@ async function bootstrap() {
   // CORS
   const origins =
     envs.environment === "prod" ? envs.originsProd : envs.originsDev;
+
+  if (envs.environment === "prod" && !origins) {
+    throw new Error("ORIGINS_PROD must be set when ENVIRONMENT=prod");
+  }
+
   app.enableCors({
     origin: origins ?? "*",
     methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
@@ -51,7 +61,7 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
       exceptionFactory: () => {
         return new BadRequestException({
-          message: "Datos inválidos",
+          message: "Invalid data",
           statusCode: 400,
         });
       },

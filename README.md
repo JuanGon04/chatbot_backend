@@ -22,78 +22,173 @@
   <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
   [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
 
-## Description
+# Wizybot Chatbot Backend — Technical Test
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+An AI-powered chatbot backend built with NestJS that uses the OpenAI Chat
+Completions API with function calling to answer customer enquiries. The
+chatbot has access to two tools:
 
-## Project setup
+- **`searchProducts`** — searches the product catalog using OpenAI embeddings
+  and cosine similarity, allowing it to match queries semantically (including
+  across languages) rather than relying on exact keyword matches.
+- **`convertCurrencies`** — converts an amount between two currencies using
+  live exchange rates from the Open Exchange Rates API.
 
-```bash
-$ npm install
+## Architecture
+
+```
+src/
+  chat/                   # Orchestrates the conversation with the LLM
+    chat.controller.ts    # POST /chat endpoint
+    chat.service.ts       # Tool-calling loop (Chat Completions API)
+    tool-definitions.ts   # JSON Schema definitions for both tools
+    dto/                  # Request DTOs
+  products/               # searchProducts tool implementation
+    products.service.ts   # CSV loading + embeddings + similarity search
+    data/
+      products_list.csv
+    dto/                  # Request DTOs
+    interfaces/
+  currency/               # convertCurrencies tool implementation
+    currency.service.ts   # Open Exchange Rates integration + caching
+    dto/                  # Request DTOs
+    interfaces/
+  common/
+    filters/
+      http-exception.filter.ts  # Global exception filter
+  config/
+    envs.ts               # Centralized environment variable access
 ```
 
-## Compile and run the project
+### How a request flows
+
+1. The client sends a user enquiry to `POST /chat`.
+2. `ChatService` sends the message to OpenAI's Chat Completions API along with
+   the definitions of both tools.
+3. If the model decides it needs a tool, `ChatService` executes it locally
+   (`ProductsService.searchProducts` or `CurrencyService.convert`) and sends
+   the result back to the model.
+4. This repeats until the model has enough information to produce a final,
+   natural-language answer, which is returned as the response body.
+
+## Prerequisites
+
+- Node.js v20 or higher
+- An [OpenAI API key](https://platform.openai.com/api-keys) with available
+  billing/credits (the free trial credits are enough for testing)
+- An [Open Exchange Rates](https://openexchangerates.org/signup) free App ID
+  (no credit card required)
+
+## Setup
+
+1. Install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+2. Copy the environment variables template and fill in your own values:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Run the project in development mode:
+
+   ```bash
+   npm run start:dev
+   ```
+
+4. The API will be available at `http://localhost:3000/api`, and the interactive
+   Swagger documentation at `http://localhost:3000/api/docs`.
+
+
+## Environment variables
+
+See [`.env.example`](./.env.example) for the full list with detailed
+comments. Summary:
+
+| Variable | Description | Default |
+|---|---|---|
+| `PORT` | Port the server listens on | `3000` |
+| `ENVIRONMENT` | Current runtime environment (`dev` or `prod`) | `dev` |
+| `ORIGINS_PROD` | Allowed CORS origins when `ENVIRONMENT=prod` | `*` |
+| `ORIGINS_DEV` | Allowed CORS origins when `ENVIRONMENT=dev` | `*` |
+| `OPENAI_API_KEY` | Your OpenAI secret key | — |
+| `MODEL` | Chat model used for tool calling | `gpt-4o-mini` |
+| `TEMPERATURE` | Sampling temperature for chat completions | `0.3` |
+| `MAX_TOOL_ROUNDS` | Max tool-calling rounds allowed per request | `5` |
+| `EMBEDDING_MODEL` | Embedding model used for semantic product search | `text-embedding-3-small` |
+| `TOP_N_RESULTS` | Max number of products returned by `searchProducts` | `2` |
+| `OPEN_EXCHANGE_RATES_APP_ID` | Your Open Exchange Rates App ID | — |
+| `OPEN_EXCHANGE_RATES_BASE_URL` | Base URL for the exchange rates API | `https://openexchangerates.org/api/latest.json` |
+| `RATES_CACHE_TTL_MS` | How long exchange rates are cached, in ms | `3600000` (1 hour) |
+| `THROTTLE_TTL_MS` | time window, in seg | `60` (1 minute) |
+| `THROTTLE_LIMIT` | max requests per window per IP | `15` |
+
+> ⚠️ In production (`ENVIRONMENT=prod`), make sure to set `ORIGINS_PROD` to
+> your actual client domain(s) instead of `*`, to avoid allowing requests
+> from any origin.
+
+## Testing the endpoint
+
+### Using cURL
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{ "message": "I am looking for a phone" }'
 ```
-
-## Run tests
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{ "message": "Convert 100 USD to EUR" }'
 ```
 
-## Deployment
+### Using Postman / Insomnia
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+- Method: `POST`
+- URL: `http://localhost:3000/api/chat`
+- Body (JSON): `{ "message": "your enquiry here" }`
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### Using Swagger
 
-```bash
-$ npm install -g mau
-$ mau deploy
-```
+Visit `http://localhost:3000/api/docs` and use the "Try it out" button on the
+`/chat` endpoint.
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Design decisions and known limitations
 
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- **Product search uses semantic embeddings instead of keyword matching.**
+  This was chosen because the product catalog is in English while customer
+  enquiries may come in other languages (e.g. Spanish). Cosine similarity
+  over OpenAI embeddings handles this naturally; a plain keyword search would
+  not. Product embeddings are computed once on application startup and
+  cached in memory, since the catalog doesn't change at runtime.
+- **`searchProducts` always returns up to 2 results, ranked by similarity,
+  without a similarity threshold.** During development, both a fixed and a
+  relative similarity threshold were tested to filter out tangentially
+  related results (e.g. headphones appearing alongside phones). However,
+  cosine similarity scores for short queries against this catalog turned out
+  to be tightly clustered, making any threshold unreliable — it either
+  filtered out genuinely relevant items or let through irrelevant ones. The
+  final approach favors recall and natural-language judgment: the LLM
+  receives both candidates and is generally able to communicate (when
+  needed) that a result is only tangentially related.
+- **Currency conversion always routes through USD.** The Open Exchange Rates
+  free plan only provides rates relative to USD as the base currency.
+  Converting between two non-USD currencies is computed as
+  `amount / rate(from) * rate(to)`.
+- **Exchange rates are cached in memory for 1 hour**, matching the free
+  plan's update frequency and helping stay within its 1,000 requests/month
+  limit.
+- **Tool-calling rounds are capped** (`MAX_TOOL_ROUNDS`) to prevent runaway
+  loops and uncontrolled API costs if the model were to repeatedly request
+  tools without ever reaching a final answer.
+- **Error handling distinguishes recoverable from non-recoverable errors.**
+  Business-logic errors (e.g. an unsupported currency code) are surfaced to
+  the LLM as a tool result, so it can explain the issue to the user in
+  natural language. Infrastructure failures (e.g. OpenAI or Open Exchange
+  Rates being unavailable) are propagated as HTTP errors with a generic
+  message for the client and the real cause preserved in server logs via the
+  `cause` property and a global exception filter.

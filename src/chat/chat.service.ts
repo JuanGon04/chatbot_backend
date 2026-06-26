@@ -106,9 +106,9 @@ export class ChatService {
   }
 
   private async executeTool(name: string, rawArgs: string): Promise<unknown> {
-    try {
-      const args = JSON.parse(rawArgs);
+    const args = JSON.parse(rawArgs);
 
+    try {
       if (name === "searchProducts") {
         return await this.productsService.searchProducts(args.query);
       }
@@ -122,8 +122,17 @@ export class ChatService {
       }
 
       return { error: `Unknown tool: ${name}` };
-    } catch (err) {
-      return { error: `Tool execution failed: ${(err as Error).message}` };
+    } catch (error) {
+      // Only business-logic errors (4xx) are recoverable by the LLM —
+      // it can explain them to the user in natural language.
+      // Infrastructure failures (5xx, network errors) should abort
+      // the request entirely, since there's nothing useful the LLM
+      // can say about a downstream API being unavailable.
+      if (error instanceof HttpException && error.getStatus() < 500) {
+        return { error: error.message };
+      }
+
+      throw error; // 5xx and unexpected errors propagate up to handleUserMessage
     }
   }
 }
