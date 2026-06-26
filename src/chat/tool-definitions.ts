@@ -42,6 +42,7 @@ export const TOOL_DEFINITIONS: ChatCompletionTool[] = [
         "Searches the product catalog for items related to the user query.",
       parameters: {
         type: "object",
+        additionalProperties: false,
         properties: {
           query: {
             type: "string",
@@ -81,6 +82,7 @@ export const TOOL_DEFINITIONS: ChatCompletionTool[] = [
         "Converts an amount from one currency to another using current exchange rates.",
       parameters: {
         type: "object",
+        additionalProperties: false,
         properties: {
           amount: { type: "number", description: "The amount to convert." },
           from: {
