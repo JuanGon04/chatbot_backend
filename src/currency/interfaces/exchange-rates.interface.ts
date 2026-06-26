@@ -14,3 +14,15 @@ export interface CachedRates {
   rates: Record<string, number>;
   fetchedAt: number;
 }
+
+
+/**
+ * Result returned to the LLM after performing a currency conversion.
+ */
+export interface CurrencyConversionResult {
+  originalAmount: number;
+  from: string;
+  to: string;
+  convertedAmount: number;
+  exchangeRate: number;
+}

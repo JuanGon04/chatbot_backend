@@ -1,10 +1,5 @@
-import {
-  Injectable,
-  HttpException,
-  HttpStatus,
-} from "@nestjs/common";
-import { CachedRates, ExchangeRatesResponse } from "./interfaces";
-import { CurrencyConversionResultDto } from "./dto";
+import { Injectable, HttpException, HttpStatus } from "@nestjs/common";
+import { CachedRates, CurrencyConversionResult, ExchangeRatesResponse } from "./interfaces";
 import { envs } from "src/config";
 
 const OPEN_EXCHANGE_RATES_BASE_URL = envs.openExchangeRatesBaseUrl;
@@ -26,7 +21,7 @@ export class CurrencyService {
     amount: number,
     from: string,
     to: string,
-  ): Promise<CurrencyConversionResultDto> {
+  ): Promise<CurrencyConversionResult> {
     const fromCode = from.toUpperCase();
     const toCode = to.toUpperCase();
 
@@ -101,7 +96,18 @@ export class CurrencyService {
     const appId = envs.openExchangeRatesAppId;
     const url = `${OPEN_EXCHANGE_RATES_BASE_URL}?app_id=${appId}`;
 
-    const response = await fetch(url);
+    let response: Response;
+
+    try {
+      response = await fetch(url);
+    } catch (error) {
+      // Network-level failure: DNS, timeout, connection refused, etc.
+      throw new HttpException(
+        "Failed to fetch exchange rates",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        { cause: error instanceof Error ? error : undefined },
+      );
+    }
 
     if (!response.ok) {
       throw new HttpException(
@@ -115,7 +121,16 @@ export class CurrencyService {
       );
     }
 
-    const data: ExchangeRatesResponse = await response.json();
-    return data.rates;
+    try {
+      const data: ExchangeRatesResponse = await response.json();
+      return data.rates;
+    } catch (error) {
+      // Response was OK but body wasn't valid JSON — unexpected API behavior.
+      throw new HttpException(
+        "Failed to parse exchange rates response",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        { cause: error instanceof Error ? error : undefined },
+      );
+    }
   }
 }
