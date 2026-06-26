@@ -1,10 +1,30 @@
 import { Injectable, HttpException, HttpStatus } from "@nestjs/common";
-import { CachedRates, CurrencyConversionResult, ExchangeRatesResponse } from "./interfaces";
+import {
+  CachedRates,
+  CurrencyConversionResult,
+  ExchangeRatesResponse,
+} from "./interfaces";
 import { envs } from "src/config";
 
 const OPEN_EXCHANGE_RATES_BASE_URL = envs.openExchangeRatesBaseUrl;
 const RATES_CACHE_TTL_MS = envs.ratesCacheTtlMs; // 1 hour, matches the free plan's update frequency
 
+/**
+ * Service responsible for currency conversion using Open Exchange Rates API.
+ *
+ * This service provides:
+ * - Real-time currency conversion between supported currencies.
+ * - Internal caching layer to reduce external API calls.
+ * - Support for non-USD conversions by routing through USD as base currency.
+ *
+ * Key design decisions:
+ * - Open Exchange Rates free plan only provides USD-based rates.
+ *   Therefore, all conversions between non-USD currencies are normalized
+ *   through USD as an intermediate step.
+ *
+ * - A simple in-memory cache is used to avoid exceeding API limits
+ *   and improve performance.
+ */
 @Injectable()
 export class CurrencyService {
   private cachedRates: CachedRates | null = null;
@@ -12,10 +32,29 @@ export class CurrencyService {
   constructor() {}
 
   /**
-   * Converts an amount from one currency to another using the latest exchange
-   * rates from Open Exchange Rates. The free plan only provides rates relative
-   * to USD, so conversions between two non-USD currencies are computed by
-   * routing through USD as an intermediary.
+   * Converts a monetary amount from one currency to another.
+   *
+   * Process:
+   * 1. Normalizes currency codes to uppercase.
+   * 2. Retrieves latest exchange rates (cached or remote).
+   * 3. Validates that both currencies are supported.
+   * 4. Computes exchange rate (direct or via USD).
+   * 5. Returns the converted amount rounded to 2 decimals.
+   *
+   * @param amount Numeric amount to convert.
+   * @param from Source currency code (e.g., USD, EUR).
+   * @param to Target currency code.
+   *
+   * @returns Object containing:
+   * - originalAmount: input amount
+   * - from: source currency
+   * - to: target currency
+   * - convertedAmount: converted value
+   * - exchangeRate: applied rate
+   *
+   * @throws HttpException
+   * - 400 if currency is not supported.
+   * - 500 if external API fails.
    */
   async convert(
     amount: number,
@@ -43,8 +82,20 @@ export class CurrencyService {
   }
 
   /**
-   * Computes the exchange rate between two currencies, routing through USD
-   * since the free plan only exposes USD-based rates.
+   * Computes exchange rate between two currencies using USD as pivot.
+   *
+   * Rules:
+   * - USD → X: direct rate
+   * - X → USD: inverse rate
+   * - X → Y: (1 / rate[X]) * rate[Y]
+   *
+   * This is required because the API only provides USD-based rates.
+   *
+   * @param from Source currency code.
+   * @param to Target currency code.
+   * @param rates Map of USD-based exchange rates.
+   *
+   * @returns Exchange rate multiplier.
    */
   private computeExchangeRate(
     from: string,
@@ -61,6 +112,14 @@ export class CurrencyService {
     return (1 / rates[from]) * rates[to];
   }
 
+  /**
+   * Validates that a currency code is supported by the API.
+   *
+   * USD is always considered valid because it is the base currency.
+   *
+   * @throws HttpException
+   * - 400 if currency is not supported.
+   */
   private assertCurrencyIsSupported(
     code: string,
     rates: Record<string, number>,
@@ -74,9 +133,17 @@ export class CurrencyService {
   }
 
   /**
-   * Returns cached exchange rates if still fresh, otherwise fetches new ones
-   * from Open Exchange Rates. Caching avoids exceeding the free plan's
-   * 1,000 requests/month limit and matches the hourly update frequency.
+   * Retrieves exchange rates using an in-memory cache.
+   *
+   * Cache strategy:
+   * - Stores last fetched rates and timestamp.
+   * - Uses TTL configured via environment variables.
+   * - Prevents exceeding API rate limits (free tier restrictions).
+   *
+   * If cache is valid → returns cached rates.
+   * If expired → fetches fresh rates from API.
+   *
+   * @returns Map of currency rates relative to USD.
    */
   private async getRates(): Promise<Record<string, number>> {
     const isCacheValid =
@@ -92,6 +159,17 @@ export class CurrencyService {
     return rates;
   }
 
+  /**
+   * Fetches latest exchange rates from Open Exchange Rates API.
+   *
+   * Handles:
+   * - Network failures (DNS, timeout, connection errors)
+   * - HTTP error responses (non-2xx)
+   * - Invalid JSON responses from API
+   *
+   * @throws HttpException
+   * - 500 if network request fails or API returns invalid data.
+   */
   private async fetchLatestRates(): Promise<Record<string, number>> {
     const appId = envs.openExchangeRatesAppId;
     const url = `${OPEN_EXCHANGE_RATES_BASE_URL}?app_id=${appId}`;
