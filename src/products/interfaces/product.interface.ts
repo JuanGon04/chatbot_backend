@@ -19,3 +19,12 @@ export interface Product {
 export interface ProductWithEmbedding extends Product {
   embedding: number[];
 }
+
+
+export interface ProductResult {
+  displayTitle: string;
+  price: string;
+  productType: string;
+  url: string;
+  imageUrl: string;
+}

@@ -9,8 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import csv = require("csv-parser");
 import { envs } from "src/config";
-import { Product, ProductWithEmbedding } from "./interfaces";
-import { ProductResultDto } from "./dto";
+import { Product, ProductResult, ProductWithEmbedding } from "./interfaces";
 
 const EMBEDDING_MODEL = envs.embeddingModel;
 const TOP_N_RESULTS = envs.topNResults;
@@ -41,26 +40,24 @@ export class ProductsService implements OnModuleInit {
    * Parses the products_list.csv file into an array of Product objects.
    */
   private loadProductsFromCsv(): Promise<Product[]> {
-    try {
-      const filePath = path.join(__dirname, "data", "products_list.csv");
-      const products: Product[] = [];
+    const filePath = path.join(__dirname, "data", "products_list.csv");
+    const products: Product[] = [];
 
-      return new Promise((resolve, reject) => {
-        fs.createReadStream(filePath)
-          .pipe(csv())
-          .on("data", (row) => products.push(this.mapRowToProduct(row)))
-          .on("end", () => resolve(products))
-          .on("error", (err) => reject(err));
-      });
-    } catch (error) {
-      throw new HttpException(
-        "Error loading products from CSV",
-        HttpStatus.INTERNAL_SERVER_ERROR,
-        {
-          cause: error instanceof Error ? error : undefined,
-        },
-      );
-    }
+    return new Promise((resolve, reject) => {
+      fs.createReadStream(filePath)
+        .pipe(csv())
+        .on("data", (row) => products.push(this.mapRowToProduct(row)))
+        .on("end", () => resolve(products))
+        .on("error", (err) => {
+          reject(
+            new HttpException(
+              "Error loading products from CSV",
+              HttpStatus.INTERNAL_SERVER_ERROR,
+              { cause: err },
+            ),
+          );
+        });
+    });
   }
 
   private mapRowToProduct(row: Record<string, string>): Product {
@@ -133,7 +130,7 @@ export class ProductsService implements OnModuleInit {
    * @param query - free-text search term describing what the user is looking for
    * @returns the top matching products (max TOP_N_RESULTS)
    */
-  async searchProducts(query: string): Promise<ProductResultDto[]> {
+  async searchProducts(query: string): Promise<ProductResult[]> {
     try {
       const queryEmbeddingResponse = await this.openai.embeddings.create({
         model: EMBEDDING_MODEL,
@@ -150,7 +147,6 @@ export class ProductsService implements OnModuleInit {
         .toSorted((a, b) => b.score - a.score)
         .slice(0, TOP_N_RESULTS)
         .map(({ product }) => this.toResultDto(product));
-        
     } catch (error) {
       throw new HttpException(
         "Error searching products",
@@ -162,7 +158,7 @@ export class ProductsService implements OnModuleInit {
     }
   }
 
-  private toResultDto(product: ProductWithEmbedding): ProductResultDto {
+  private toResultDto(product: ProductWithEmbedding): ProductResult {
     return {
       displayTitle: product.displayTitle,
       price: product.price,
