@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import { HttpException, HttpStatus, Inject, Injectable } from "@nestjs/common";
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { TOOL_DEFINITIONS } from "./tool-definitions";
@@ -6,17 +6,38 @@ import { envs } from "src/config";
 import { ProductsService } from "src/products/products.service";
 import { CurrencyService } from "src/currency/currency.service";
 import { ChatDto } from "./dto";
+import { OPENAI_CLIENT } from "src/openai/openai.provider";
+import { ToolHandlers } from "./types";
 
 @Injectable()
 export class ChatService {
-  private readonly openai: OpenAI;
+  private readonly toolHandlers: ToolHandlers = {
+    searchProducts: (args) => this.productsService.searchProducts(args.query),
+
+    convertCurrencies: (args) =>
+      this.currencyService.convert(args.amount, args.from, args.to),
+  };
 
   constructor(
+    /**
+     * OpenAI SDK client used to communicate with the Chat Completions API.
+     */
+    @Inject(OPENAI_CLIENT)
+    private readonly openai: OpenAI,
+
     private readonly productsService: ProductsService,
     private readonly currencyService: CurrencyService,
-  ) {
-    this.openai = new OpenAI({
-      apiKey: envs.openaiApiKey,
+  ) {}
+
+  /**
+   * Sends the current conversation to OpenAI.
+   */
+  private createCompletion(messages: ChatCompletionMessageParam[]) {
+    return this.openai.chat.completions.create({
+      model: envs.model,
+      messages,
+      tools: TOOL_DEFINITIONS,
+      temperature: envs.temperature,
     });
   }
 
@@ -26,16 +47,12 @@ export class ChatService {
     ];
 
     try {
-      let response = await this.openai.chat.completions.create({
-        model: envs.model,
-        messages,
-        tools: TOOL_DEFINITIONS,
-        temperature: envs.temperature,
-      });
+      let response = await this.createCompletion(messages);
 
       let choice = response.choices[0];
       let rounds = 0;
 
+      // Execute tools until the model produces a final response.
       while (
         choice.finish_reason === "tool_calls" &&
         choice.message.tool_calls
@@ -48,10 +65,18 @@ export class ChatService {
         }
 
         const toolCalls = choice.message.tool_calls;
-        messages.push(choice.message);
+
+        // Preserve the assistant message so the model keeps its reasoning
+        // context when tool outputs are appended.
+        messages.push({
+          ...choice.message,
+          role: "assistant",
+        });
 
         const toolResults = await Promise.all(
           toolCalls.map(async (toolCall) => {
+            // Ignore unsupported tool call types while allowing the model
+            // to recover gracefully.
             if (toolCall.type !== "function") {
               return {
                 role: "tool" as const,
@@ -77,26 +102,18 @@ export class ChatService {
 
         messages.push(...toolResults);
 
-        response = await this.openai.chat.completions.create({
-          model: envs.model,
-          messages,
-          tools: TOOL_DEFINITIONS,
-          temperature: envs.temperature,
-        });
+        response = await this.createCompletion(messages);
         choice = response.choices[0];
       }
 
       return choice.message.content ?? "";
     } catch (error) {
-      // Re-throw HttpExceptions as-is: they're already well-formed errors
-      // with the correct status code and message for the client.
+      // Preserve client-facing HTTP errors.
       if (error instanceof HttpException) {
         throw error;
       }
 
-      // Anything else is an unexpected failure (e.g. OpenAI API down,
-      // network error, malformed response) — wrap it with a generic
-      // message and preserve the real cause for logging.
+      // Wrap unexpected infrastructure failures into a generic 500 response.
       throw new HttpException(
         "Error processing chat message",
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -105,23 +122,34 @@ export class ChatService {
     }
   }
 
+  private parseArguments(rawArgs: string) {
+    try {
+      return JSON.parse(rawArgs);
+    } catch (error) {
+      throw new HttpException(
+        "Invalid tool arguments",
+        HttpStatus.BAD_REQUEST,
+        {
+          cause: error instanceof Error ? error : new Error(String(error)),
+        },
+      );
+    }
+  }
+
+ 
   private async executeTool(name: string, rawArgs: string): Promise<unknown> {
-    const args = JSON.parse(rawArgs);
+    const args = this.parseArguments(rawArgs);
 
     try {
-      if (name === "searchProducts") {
-        return await this.productsService.searchProducts(args.query);
+      const handler = this.toolHandlers[name];
+
+      if (!handler) {
+        return {
+          error: `Tool not registered: ${name}`,
+        };
       }
 
-      if (name === "convertCurrencies") {
-        return await this.currencyService.convert(
-          args.amount,
-          args.from,
-          args.to,
-        );
-      }
-
-      return { error: `Unknown tool: ${name}` };
+      return await handler(args);
     } catch (error) {
       // Only business-logic errors (4xx) are recoverable by the LLM —
       // it can explain them to the user in natural language.

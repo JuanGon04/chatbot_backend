@@ -5,6 +5,7 @@ import { CurrencyModule } from "./currency/currency.module";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { envs } from "./config";
 import { APP_GUARD } from "@nestjs/core";
+import { OpenAiModule } from "./openai/openai.module";
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { APP_GUARD } from "@nestjs/core";
     ChatModule,
     ProductsModule,
     CurrencyModule,
+    OpenAiModule
   ],
   providers: [
     {
